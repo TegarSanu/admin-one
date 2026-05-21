@@ -35,7 +35,9 @@ export default function StoresPage() {
 
   const fetchStores = () => {
     setLoading(true);
-    fetch(`/api/admin/marketplace/stores?search=${searchQuery}&status=${statusFilter}`)
+    fetch(
+      `/api/admin/marketplace/stores?search=${searchQuery}&status=${statusFilter}`,
+    )
       .then((res) => res.json())
       .then((data) => {
         setStores(data.stores || []);
@@ -84,7 +86,13 @@ export default function StoresPage() {
       });
       if (res.ok) {
         setIsAddModalOpen(false);
-        setFormData({ name: "", address: "", phone: "", description: "", owner: "" });
+        setFormData({
+          name: "",
+          address: "",
+          phone: "",
+          description: "",
+          owner: "",
+        });
         fetchStores();
       }
     } catch (err) {
@@ -111,7 +119,7 @@ export default function StoresPage() {
     (s) =>
       s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       s.address?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      s.owner?.name?.toLowerCase().includes(searchQuery.toLowerCase())
+      s.owner?.name?.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
   return (
@@ -131,7 +139,9 @@ export default function StoresPage() {
             onClick={fetchStores}
             className="p-2.5 rounded-xl border border-border hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
           >
-            <RefreshCw className={loading ? "animate-spin w-4 h-4" : "w-4 h-4"} />
+            <RefreshCw
+              className={loading ? "animate-spin w-4 h-4" : "w-4 h-4"}
+            />
           </button>
           <select
             value={statusFilter}
@@ -159,7 +169,9 @@ export default function StoresPage() {
           <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1">
             Total Toko
           </p>
-          <h3 className="text-2xl font-black text-foreground">{stores.length}</h3>
+          <h3 className="text-2xl font-black text-foreground">
+            {stores.length}
+          </h3>
           <p className="text-xs font-medium text-muted-foreground mt-2">
             Terdaftar di marketplace
           </p>
@@ -189,7 +201,7 @@ export default function StoresPage() {
       </div>
 
       {/* Table */}
-      <div className="glass-panel rounded-3xl overflow-hidden border border-border/50">
+      <div className="glass-panel rounded-3xl border border-border/50">
         <div className="p-4 border-b border-border/50 bg-muted/20 flex items-center justify-between">
           <div className="relative w-full max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -215,7 +227,9 @@ export default function StoresPage() {
             <div className="flex flex-col items-center justify-center py-20 gap-4 text-center">
               <StoreIcon className="w-10 h-10 text-muted-foreground opacity-20" />
               <div>
-                <p className="text-sm font-black text-foreground">Tidak ada toko ditemukan</p>
+                <p className="text-sm font-black text-foreground">
+                  Tidak ada toko ditemukan
+                </p>
                 <p className="text-[10px] font-bold text-muted-foreground uppercase mt-1">
                   Coba ubah kata kunci pencarian
                 </p>
@@ -272,7 +286,7 @@ export default function StoresPage() {
                     <td className="px-6 py-5">
                       <span
                         className={`inline-flex px-2.5 py-1 rounded-md border font-black text-[10px] uppercase tracking-widest ${getStatusStyle(
-                          store.status
+                          store.status,
                         )}`}
                       >
                         {store.status}
