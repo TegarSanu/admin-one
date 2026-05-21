@@ -7,6 +7,9 @@ import { Role } from '@/models/Role';
 import { KanbanColumn, KanbanTask } from '@/models/Kanban';
 import { Store } from '@/models/Store';
 import { Product } from '@/models/Product';
+import { MarketplaceTransaction } from '@/models/MarketplaceTransaction';
+import { CustomerDebt } from '@/models/CustomerDebt';
+import { Cashflow } from '@/models/Cashflow';
 import bcrypt from 'bcryptjs';
 
 /**
@@ -37,7 +40,10 @@ export async function GET() {
       KanbanColumn.deleteMany({}),
       KanbanTask.deleteMany({}),
       Store.deleteMany({}),
-      Product.deleteMany({})
+      Product.deleteMany({}),
+      MarketplaceTransaction.deleteMany({}),
+      CustomerDebt.deleteMany({}),
+      Cashflow.deleteMany({})
     ]);
 
     // 1.5 Create Roles
@@ -216,7 +222,7 @@ export async function GET() {
 
     const productsData = [
       // Store 1 - Toko Kelontong Berkah
-      { storeId: createdStores[0]._id, name: 'Beras Premium 5kg', description: 'Beras putih premium kualitas terbaik dari padi pilihan.', price: 75000, stock: 50, category: 'Sembako', status: 'available' },
+      { storeId: createdStores[0]._id, name: 'Beras Premium 5kg', description: 'Beras putih premium kualitas terbaik dari padi pilihan.', price: 75000, stock: 8, category: 'Sembako', status: 'available' },
       { storeId: createdStores[0]._id, name: 'Minyak Goreng 2L', description: 'Minyak goreng sawit kemasan 2 liter, jernih dan sehat.', price: 36000, stock: 80, category: 'Sembako', status: 'available' },
       { storeId: createdStores[0]._id, name: 'Gula Pasir 1kg', description: 'Gula pasir putih kristal kemasan 1 kilogram.', price: 16000, stock: 100, category: 'Sembako', status: 'available' },
       { storeId: createdStores[0]._id, name: 'Kopi Kapal Api 165g', description: 'Kopi bubuk hitam legendaris, aroma dan rasa khas.', price: 12000, stock: 60, category: 'Minuman', status: 'available' },
@@ -225,16 +231,170 @@ export async function GET() {
       { storeId: createdStores[1]._id, name: 'Indomie Goreng (5 pcs)', description: 'Mi instan goreng favorit Indonesia, isi 5 bungkus.', price: 15000, stock: 200, category: 'Makanan', status: 'available' },
       { storeId: createdStores[1]._id, name: 'Teh Botol Sosro 450ml', description: 'Teh manis dalam kemasan botol, segar dan nikmat.', price: 5000, stock: 150, category: 'Minuman', status: 'available' },
       { storeId: createdStores[1]._id, name: 'Telur Ayam 1kg', description: 'Telur ayam negeri segar, sumber protein berkualitas.', price: 28000, stock: 40, category: 'Sembako', status: 'available' },
-      { storeId: createdStores[1]._id, name: 'Deterjen Bubuk 900g', description: 'Deterjen bubuk wangi untuk cucian bersih dan harum.', price: 22000, stock: 35, category: 'Kebutuhan Rumah', status: 'available' },
+      { storeId: createdStores[1]._id, name: 'Deterjen Bubuk 900g', description: 'Deterjen bubuk wangi untuk cucian bersih dan harum.', price: 22000, stock: 4, category: 'Kebutuhan Rumah', status: 'available' },
       { storeId: createdStores[1]._id, name: 'Chitato Sapi Panggang 68g', description: 'Keripik kentang renyah rasa sapi panggang.', price: 11000, stock: 90, category: 'Makanan', status: 'available' },
       // Store 3 - Mini Market Sejahtera
       { storeId: createdStores[2]._id, name: 'Susu Ultra Milk 1L', description: 'Susu UHT full cream untuk keluarga sehat.', price: 19000, stock: 70, category: 'Minuman', status: 'available' },
-      { storeId: createdStores[2]._id, name: 'Tepung Terigu 1kg', description: 'Tepung terigu serbaguna untuk aneka masakan dan kue.', price: 13000, stock: 55, category: 'Sembako', status: 'available' },
+      { storeId: createdStores[2]._id, name: 'Tepung Terigu 1kg', description: 'Tepung terigu serbaguna untuk aneka masakan dan kue.', price: 13000, stock: 12, category: 'Sembako', status: 'available' },
       { storeId: createdStores[2]._id, name: 'Sambal ABC 335ml', description: 'Sambal asli dengan cita rasa pedas yang menggugah selera.', price: 15000, stock: 65, category: 'Makanan', status: 'available' },
       { storeId: createdStores[2]._id, name: 'Tissue Paseo 250s', description: 'Tisu wajah lembut dan tebal isi 250 lembar.', price: 18000, stock: 80, category: 'Kebutuhan Rumah', status: 'available' },
       { storeId: createdStores[2]._id, name: 'Aqua 600ml (6 pcs)', description: 'Air mineral kemasan 600ml isi 6 botol, segar dan murni.', price: 12000, stock: 120, category: 'Minuman', status: 'available' },
     ];
     const createdProducts = await Product.insertMany(productsData);
+
+    // 8.5 Seed Marketplace Transactions, Cashflow, and Customer Debt
+    const transactionsData = [];
+    const cashflowsData = [];
+    const debtsData = [];
+
+    const today = new Date();
+
+    // Helper to generate a date relative to today
+    const daysAgo = (numDays: number) => {
+      const d = new Date();
+      d.setDate(today.getDate() - numDays);
+      d.setHours(Math.floor(Math.random() * 12) + 8, Math.floor(Math.random() * 60), 0, 0);
+      return d;
+    };
+
+    const customers = [
+      'Pak Budi', 'Ibu Aminah', 'Rian Wijaya', 'Siti Rahma', 
+      'Ahmad Fauzi', 'Dewi Lestari', 'Joko Susilo', 'Lani Indah'
+    ];
+
+    // Seed 30 days of data for each store
+    for (let day = 0; day < 30; day++) {
+      const currentDate = daysAgo(day);
+
+      for (const store of createdStores) {
+        const storeProducts = createdProducts.filter(p => p.storeId.toString() === store._id.toString());
+        if (storeProducts.length === 0) continue;
+
+        // Generate 1-4 sales per day
+        const dailySalesCount = Math.floor(Math.random() * 4) + 1;
+
+        for (let t = 0; t < dailySalesCount; t++) {
+          const product = storeProducts[Math.floor(Math.random() * storeProducts.length)];
+          const quantity = Math.floor(Math.random() * 3) + 1; // 1-3 items
+          const saleAmount = product.price * quantity;
+
+          const customer = customers[Math.floor(Math.random() * customers.length)];
+          const paymentMethod = Math.random() > 0.85 ? 'debt' : (Math.random() > 0.5 ? 'cash' : 'transfer');
+
+          // Transaction record
+          transactionsData.push({
+            storeId: store._id,
+            type: 'sale',
+            amount: saleAmount,
+            paymentMethod,
+            customerName: customer,
+            items: [{
+              productId: product._id,
+              name: product.name,
+              quantity,
+              price: product.price
+            }],
+            date: currentDate
+          });
+
+          // Cashflow IN record (if paid immediately or transfer)
+          if (paymentMethod !== 'debt') {
+            cashflowsData.push({
+              storeId: store._id,
+              type: 'in',
+              amount: saleAmount,
+              category: 'sale',
+              description: `Penjualan ${product.name} (x${quantity})`,
+              date: currentDate
+            });
+          } else {
+            // Customer debt (receivable)
+            const isPaid = day > 10 && Math.random() > 0.5;
+            const isPartial = !isPaid && Math.random() > 0.5;
+            
+            const remainingAmount = isPaid ? 0 : (isPartial ? Math.round(saleAmount / 2) : saleAmount);
+            const status = isPaid ? 'paid' : (isPartial ? 'partial' : 'unpaid');
+            
+            debtsData.push({
+              storeId: store._id,
+              customerName: customer,
+              type: 'receivable',
+              amount: saleAmount,
+              remainingAmount,
+              description: `Hutang belanja ${product.name} (x${quantity})`,
+              status,
+              dueDate: new Date(currentDate.getTime() + 14 * 24 * 60 * 60 * 1000)
+            });
+
+            if (isPartial || isPaid) {
+              cashflowsData.push({
+                storeId: store._id,
+                type: 'in',
+                amount: saleAmount - remainingAmount,
+                category: 'sale',
+                description: `Pembayaran cicilan/lunas hutang oleh ${customer}`,
+                date: new Date(currentDate.getTime() + 2 * 24 * 60 * 60 * 1000)
+              });
+            }
+          }
+        }
+
+        // Operational Outflows: 2-3 expenses per store per month (buy stocks or pay utilities)
+        if (day % 10 === 0) {
+          const expenseAmount = Math.floor(Math.random() * 150000) + 50000;
+          const expenseCategories = ['purchase', 'operational'];
+          const category = expenseCategories[Math.floor(Math.random() * expenseCategories.length)];
+          const desc = category === 'purchase' ? 'Kulakan stok sembako grosir' : 'Bayar biaya kebersihan & listrik';
+
+          transactionsData.push({
+            storeId: store._id,
+            type: 'purchase',
+            amount: expenseAmount,
+            paymentMethod: 'cash',
+            items: [],
+            date: currentDate
+          });
+
+          cashflowsData.push({
+            storeId: store._id,
+            type: 'out',
+            amount: expenseAmount,
+            category,
+            description: desc,
+            date: currentDate
+          });
+        }
+      }
+    }
+
+    // Supplier payable debts (toko hutang ke supplier)
+    for (const store of createdStores) {
+      debtsData.push({
+        storeId: store._id,
+        customerName: 'Grosir Sembako Jaya',
+        type: 'payable',
+        amount: 450000,
+        remainingAmount: 450000,
+        description: 'Kulakan stok beras dan minyak goreng bulanan',
+        status: 'unpaid',
+        dueDate: new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000)
+      });
+      
+      debtsData.push({
+        storeId: store._id,
+        customerName: 'Agen Minuman Berkah',
+        type: 'payable',
+        amount: 250000,
+        remainingAmount: 0,
+        description: 'Restock minuman teh botol & aqua gelas',
+        status: 'paid',
+        dueDate: new Date(today.getTime() - 3 * 24 * 60 * 60 * 1000)
+      });
+    }
+
+    await MarketplaceTransaction.insertMany(transactionsData);
+    await Cashflow.insertMany(cashflowsData);
+    await CustomerDebt.insertMany(debtsData);
 
     return NextResponse.json({ 
       success: true, 
@@ -246,7 +406,10 @@ export async function GET() {
         activities: activitiesData.length,
         kanbanTasks: kanbanTasks.length,
         stores: createdStores.length,
-        products: createdProducts.length
+        products: createdProducts.length,
+        transactions: transactionsData.length,
+        cashflows: cashflowsData.length,
+        debts: debtsData.length
       }
     });
 

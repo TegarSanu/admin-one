@@ -59,8 +59,21 @@ const navigation = [
     icon: StoreIcon,
     children: [
       { name: "Overview", href: "/admin/marketplace", icon: PieChartIcon },
-      { name: "Toko Kelontong", href: "/admin/marketplace/stores", icon: StoreIcon },
-      { name: "Products", href: "/admin/marketplace/products", icon: ShoppingCart },
+      {
+        name: "Toko Kelontong",
+        href: "/admin/marketplace/stores",
+        icon: StoreIcon,
+      },
+      {
+        name: "Products",
+        href: "/admin/marketplace/products",
+        icon: ShoppingCart,
+      },
+      {
+        name: "Cashflow",
+        href: "/admin/marketplace/cashflow",
+        icon: BarChart3,
+      },
       { name: "Public Storefront 🌐", href: "/marketplace", icon: ShoppingBag },
     ],
   },
@@ -72,32 +85,45 @@ export default function Sidebar() {
   const pathname = usePathname();
   const { isOpen: isMobileOpen, close } = useMobileMenu();
   const { user, hasPermission } = useAuthStore();
-  const [openMenus, setOpenMenus] = useState<string[]>(["CRM"]);
+  const [openMenus, setOpenMenus] = useState<string[]>([""]);
 
-  const filteredNavigation = navigation.map(item => {
-    // If it has children, filter children
-    if (item.children) {
-      const filteredChildren = item.children.filter(child => {
-        if (child.name === "All Users" || child.name === "Roles & Permissions") return hasPermission("Users", "read");
-        if (child.name === "Customers" || child.name === "Companies" || child.name === "Sales Pipeline" || child.name === "Overview") return hasPermission("CRM", "read");
-        return true; // Default allow
-      });
-      return { ...item, children: filteredChildren };
-    }
-    return item;
-  }).filter(item => {
-    // Hide parent if all children are hidden
-    if (item.children && item.children.length === 0) return false;
-    
-    // Check specific module permissions
-    if (item.name === "User Management") return hasPermission("Users", "read");
-    if (item.name === "CRM") return hasPermission("CRM", "read");
-    if (item.name === "Settings") return hasPermission("Settings", "read");
-    if (item.name === "Media") return hasPermission("Media", "read");
-    if (item.name === "Marketplace") return true; // TODO: Add specific permission if needed
-    
-    return true; // Dashboard, Activity, Kanban are visible to all (or adjust as needed)
-  });
+  const filteredNavigation = navigation
+    .map((item) => {
+      // If it has children, filter children
+      if (item.children) {
+        const filteredChildren = item.children.filter((child) => {
+          if (
+            child.name === "All Users" ||
+            child.name === "Roles & Permissions"
+          )
+            return hasPermission("Users", "read");
+          if (
+            child.name === "Customers" ||
+            child.name === "Companies" ||
+            child.name === "Sales Pipeline" ||
+            child.name === "Overview"
+          )
+            return hasPermission("CRM", "read");
+          return true; // Default allow
+        });
+        return { ...item, children: filteredChildren };
+      }
+      return item;
+    })
+    .filter((item) => {
+      // Hide parent if all children are hidden
+      if (item.children && item.children.length === 0) return false;
+
+      // Check specific module permissions
+      if (item.name === "User Management")
+        return hasPermission("Users", "read");
+      if (item.name === "CRM") return hasPermission("CRM", "read");
+      if (item.name === "Settings") return hasPermission("Settings", "read");
+      if (item.name === "Media") return hasPermission("Media", "read");
+      if (item.name === "Marketplace") return true; // TODO: Add specific permission if needed
+
+      return true; // Dashboard, Activity, Kanban are visible to all (or adjust as needed)
+    });
 
   const toggleMenu = (name: string) => {
     setOpenMenus((prev) =>
@@ -134,12 +160,16 @@ export default function Sidebar() {
               className="flex items-center gap-2 group outline-none"
               onClick={close}
             >
-              <div className="w-9 h-9 accent-icon-box-solid rounded-xl flex items-center justify-center transition-all group-hover:scale-105 shadow-lg" style={{ boxShadow: '0 4px 14px var(--accent-glow)' }}>
+              <div
+                className="w-9 h-9 accent-icon-box-solid rounded-xl flex items-center justify-center transition-all group-hover:scale-105 shadow-lg"
+                style={{ boxShadow: "0 4px 14px var(--accent-glow)" }}
+              >
                 <Sparkles className="w-5 h-5" />
               </div>
               <div className="flex flex-col">
                 <span className="text-lg font-black text-foreground tracking-tighter leading-none italic uppercase">
-                  Admin<span className="text-accent-dynamic opacity-70">One</span>
+                  Admin
+                  <span className="text-accent-dynamic opacity-70">One</span>
                 </span>
                 <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest mt-0.5">
                   Premium Dashboard
@@ -286,7 +316,10 @@ export default function Sidebar() {
           {/* User Footer */}
           <div className="p-6 border-t border-border/50 bg-muted/5 shrink-0 mt-auto">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl accent-icon-box-solid flex items-center justify-center font-black text-[10px] shadow-lg uppercase" style={{ boxShadow: '0 4px 14px var(--accent-glow)' }}>
+              <div
+                className="w-9 h-9 rounded-xl accent-icon-box-solid flex items-center justify-center font-black text-[10px] shadow-lg uppercase"
+                style={{ boxShadow: "0 4px 14px var(--accent-glow)" }}
+              >
                 {user?.name?.substring(0, 2) || "AD"}
               </div>
               <div className="flex-1 min-w-0">
@@ -301,8 +334,8 @@ export default function Sidebar() {
                 className="p-2 hover:bg-muted rounded-xl text-muted-foreground transition-colors outline-none"
                 aria-label="Open settings"
                 onClick={async () => {
-                   await fetch('/api/auth/logout', { method: 'POST' });
-                   window.location.href = '/login';
+                  await fetch("/api/auth/logout", { method: "POST" });
+                  window.location.href = "/login";
                 }}
               >
                 <Settings className="w-4 h-4" />
