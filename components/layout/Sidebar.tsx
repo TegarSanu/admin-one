@@ -80,7 +80,11 @@ export default function Sidebar() {
   const pathname = usePathname();
   const { isOpen: isMobileOpen, close } = useMobileMenu();
   const { user, hasPermission } = useAuthStore();
-  const [openMenus, setOpenMenus] = useState<string[]>([""]);
+  const [openMenus, setOpenMenus] = useState<string[]>([
+    "CRM",
+    "User Management",
+    "Marketplace",
+  ]);
 
   const filteredNavigation = navigation
     .map((item) => {

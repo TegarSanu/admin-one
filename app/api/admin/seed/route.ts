@@ -7,6 +7,7 @@ import { Role } from '@/models/Role';
 import { KanbanColumn, KanbanTask } from '@/models/Kanban';
 import { Store } from '@/models/Store';
 import { Product } from '@/models/Product';
+import { Transaction } from '@/models/Transaction';
 import bcrypt from 'bcryptjs';
 
 /**
@@ -14,7 +15,7 @@ import bcrypt from 'bcryptjs';
  * /api/admin/seed:
  *   get:
  *     summary: Seed the database
- *     description: Clears existing collections (Users, Companies, Leads, Activities, Roles, KanbanColumns, KanbanTasks) and populates them with sample seed data.
+ *     description: Clears existing collections and populates them with sample seed data.
  *     tags:
  *       - Database Seeding
  *     responses:
@@ -27,7 +28,7 @@ export async function GET() {
   try {
     await connectToDatabase();
 
-    // 1. Clear existing data
+    // 1. Clear existing data including Transactions
     await Promise.all([
       User.deleteMany({}),
       Company.deleteMany({}),
@@ -37,7 +38,8 @@ export async function GET() {
       KanbanColumn.deleteMany({}),
       KanbanTask.deleteMany({}),
       Store.deleteMany({}),
-      Product.deleteMany({})
+      Product.deleteMany({}),
+      Transaction.deleteMany({}) // Reset Riwayat Transaksi!
     ]);
 
     // 1.5 Create Roles
@@ -207,32 +209,34 @@ export async function GET() {
     await KanbanTask.insertMany(kanbanTasks);
 
     // 8. Create Marketplace Stores & Products
+    // Memasang Modal Awal: Rp 1.000.000 untuk semua toko
     const storesData = [
-      { name: 'Toko Kelontong Berkah', owner: createdUsers[0]._id, description: 'Menyediakan berbagai kebutuhan pokok sehari-hari dengan harga terjangkau.', address: 'Jl. Merdeka No. 12, Bandung', phone: '081234567890', status: 'active', balance: 2500000 },
-      { name: 'Warung Madura Jaya', owner: createdUsers[1]._id, description: 'Warung kelontong lengkap buka 24 jam, menyediakan sembako dan kebutuhan rumah tangga.', address: 'Jl. Pahlawan No. 45, Surabaya', phone: '082345678901', status: 'active', balance: 1800000 },
-      { name: 'Mini Market Sejahtera', owner: createdUsers[2]._id, description: 'Mini market modern dengan produk berkualitas dan pelayanan ramah.', address: 'Jl. Sudirman No. 78, Jakarta', phone: '083456789012', status: 'active', balance: 3200000 },
+      { name: 'Toko Kelontong Berkah', owner: createdUsers[0]._id, description: 'Menyediakan berbagai kebutuhan pokok sehari-hari dengan harga terjangkau.', address: 'Jl. Merdeka No. 12, Bandung', phone: '081234567890', status: 'active', balance: 1000000 },
+      { name: 'Warung Madura Jaya', owner: createdUsers[1]._id, description: 'Warung kelontong lengkap buka 24 jam, menyediakan sembako dan kebutuhan rumah tangga.', address: 'Jl. Pahlawan No. 45, Surabaya', phone: '082345678901', status: 'active', balance: 1000000 },
+      { name: 'Mini Market Sejahtera', owner: createdUsers[2]._id, description: 'Mini market modern dengan produk berkualitas dan pelayanan ramah.', address: 'Jl. Sudirman No. 78, Jakarta', phone: '083456789012', status: 'active', balance: 1000000 },
     ];
     const createdStores = await Store.insertMany(storesData);
 
+    // Mereset semua nilai stok menjadi pas 100
     const productsData = [
       // Store 1 - Toko Kelontong Berkah
-      { storeId: createdStores[0]._id, name: 'Beras Premium 5kg', description: 'Beras putih premium kualitas terbaik dari padi pilihan.', price: 75000, stock: 50, category: 'Sembako', status: 'available' },
-      { storeId: createdStores[0]._id, name: 'Minyak Goreng 2L', description: 'Minyak goreng sawit kemasan 2 liter, jernih dan sehat.', price: 36000, stock: 80, category: 'Sembako', status: 'available' },
+      { storeId: createdStores[0]._id, name: 'Beras Premium 5kg', description: 'Beras putih premium kualitas terbaik dari padi pilihan.', price: 75000, stock: 100, category: 'Sembako', status: 'available' },
+      { storeId: createdStores[0]._id, name: 'Minyak Goreng 2L', description: 'Minyak goreng sawit kemasan 2 liter, jernih dan sehat.', price: 36000, stock: 100, category: 'Sembako', status: 'available' },
       { storeId: createdStores[0]._id, name: 'Gula Pasir 1kg', description: 'Gula pasir putih kristal kemasan 1 kilogram.', price: 16000, stock: 100, category: 'Sembako', status: 'available' },
-      { storeId: createdStores[0]._id, name: 'Kopi Kapal Api 165g', description: 'Kopi bubuk hitam legendaris, aroma dan rasa khas.', price: 12000, stock: 60, category: 'Minuman', status: 'available' },
-      { storeId: createdStores[0]._id, name: 'Sabun Cuci Piring 800ml', description: 'Sabun cuci piring cair pembersih lemak membandel.', price: 14000, stock: 45, category: 'Kebutuhan Rumah', status: 'available' },
+      { storeId: createdStores[0]._id, name: 'Kopi Kapal Api 165g', description: 'Kopi bubuk hitam legendaris, aroma dan rasa khas.', price: 12000, stock: 100, category: 'Minuman', status: 'available' },
+      { storeId: createdStores[0]._id, name: 'Sabun Cuci Piring 800ml', description: 'Sabun cuci piring cair pembersih lemak membandel.', price: 14000, stock: 100, category: 'Kebutuhan Rumah', status: 'available' },
       // Store 2 - Warung Madura Jaya
-      { storeId: createdStores[1]._id, name: 'Indomie Goreng (5 pcs)', description: 'Mi instan goreng favorit Indonesia, isi 5 bungkus.', price: 15000, stock: 200, category: 'Makanan', status: 'available' },
-      { storeId: createdStores[1]._id, name: 'Teh Botol Sosro 450ml', description: 'Teh manis dalam kemasan botol, segar dan nikmat.', price: 5000, stock: 150, category: 'Minuman', status: 'available' },
-      { storeId: createdStores[1]._id, name: 'Telur Ayam 1kg', description: 'Telur ayam negeri segar, sumber protein berkualitas.', price: 28000, stock: 40, category: 'Sembako', status: 'available' },
-      { storeId: createdStores[1]._id, name: 'Deterjen Bubuk 900g', description: 'Deterjen bubuk wangi untuk cucian bersih dan harum.', price: 22000, stock: 35, category: 'Kebutuhan Rumah', status: 'available' },
-      { storeId: createdStores[1]._id, name: 'Chitato Sapi Panggang 68g', description: 'Keripik kentang renyah rasa sapi panggang.', price: 11000, stock: 90, category: 'Makanan', status: 'available' },
+      { storeId: createdStores[1]._id, name: 'Indomie Goreng (5 pcs)', description: 'Mi instan goreng favorit Indonesia, isi 5 bungkus.', price: 15000, stock: 100, category: 'Makanan', status: 'available' },
+      { storeId: createdStores[1]._id, name: 'Teh Botol Sosro 450ml', description: 'Teh manis dalam kemasan botol, segar dan nikmat.', price: 5000, stock: 100, category: 'Minuman', status: 'available' },
+      { storeId: createdStores[1]._id, name: 'Telur Ayam 1kg', description: 'Telur ayam negeri segar, sumber protein berkualitas.', price: 28000, stock: 100, category: 'Sembako', status: 'available' },
+      { storeId: createdStores[1]._id, name: 'Deterjen Bubuk 900g', description: 'Deterjen bubuk wangi untuk cucian bersih dan harum.', price: 22000, stock: 100, category: 'Kebutuhan Rumah', status: 'available' },
+      { storeId: createdStores[1]._id, name: 'Chitato Sapi Panggang 68g', description: 'Keripik kentang renyah rasa sapi panggang.', price: 11000, stock: 100, category: 'Makanan', status: 'available' },
       // Store 3 - Mini Market Sejahtera
-      { storeId: createdStores[2]._id, name: 'Susu Ultra Milk 1L', description: 'Susu UHT full cream untuk keluarga sehat.', price: 19000, stock: 70, category: 'Minuman', status: 'available' },
-      { storeId: createdStores[2]._id, name: 'Tepung Terigu 1kg', description: 'Tepung terigu serbaguna untuk aneka masakan dan kue.', price: 13000, stock: 55, category: 'Sembako', status: 'available' },
-      { storeId: createdStores[2]._id, name: 'Sambal ABC 335ml', description: 'Sambal asli dengan cita rasa pedas yang menggugah selera.', price: 15000, stock: 65, category: 'Makanan', status: 'available' },
-      { storeId: createdStores[2]._id, name: 'Tissue Paseo 250s', description: 'Tisu wajah lembut dan tebal isi 250 lembar.', price: 18000, stock: 80, category: 'Kebutuhan Rumah', status: 'available' },
-      { storeId: createdStores[2]._id, name: 'Aqua 600ml (6 pcs)', description: 'Air mineral kemasan 600ml isi 6 botol, segar dan murni.', price: 12000, stock: 120, category: 'Minuman', status: 'available' },
+      { storeId: createdStores[2]._id, name: 'Susu Ultra Milk 1L', description: 'Susu UHT full cream untuk keluarga sehat.', price: 19000, stock: 100, category: 'Minuman', status: 'available' },
+      { storeId: createdStores[2]._id, name: 'Tepung Terigu 1kg', description: 'Tepung terigu serbaguna untuk aneka masakan dan kue.', price: 13000, stock: 100, category: 'Sembako', status: 'available' },
+      { storeId: createdStores[2]._id, name: 'Sambal ABC 335ml', description: 'Sambal asli dengan cita rasa pedas yang menggugah selera.', price: 15000, stock: 100, category: 'Makanan', status: 'available' },
+      { storeId: createdStores[2]._id, name: 'Tissue Paseo 250s', description: 'Tisu wajah lembut dan tebal isi 250 lembar.', price: 18000, stock: 100, category: 'Kebutuhan Rumah', status: 'available' },
+      { storeId: createdStores[2]._id, name: 'Aqua 600ml (6 pcs)', description: 'Air mineral kemasan 600ml isi 6 botol, segar dan murni.', price: 12000, stock: 100, category: 'Minuman', status: 'available' },
     ];
     const createdProducts = await Product.insertMany(productsData);
 
