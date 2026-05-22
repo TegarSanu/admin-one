@@ -6,7 +6,8 @@
     "dev": "docker start mongodb && next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --test test/checkout-utils.test.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

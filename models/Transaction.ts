@@ -1,29 +1,29 @@
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 
 const transactionSchema = new mongoose.Schema(
   {
     buyerId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
+      ref: "User",
       required: false, // Optional for Guest checkouts
     },
     buyerName: {
       type: String,
-      default: 'Guest',
+      default: "Guest",
     },
     checkoutId: {
       type: String, // Groups multiple store transactions into one unified receipt
     },
     storeId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Store',
-      required: [true, 'Store reference is required'],
+      ref: "Store",
+      required: [true, "Store reference is required"],
     },
     items: [
       {
         productId: {
           type: mongoose.Schema.Types.ObjectId,
-          ref: 'Product',
+          ref: "Product",
           required: true,
         },
         name: {
@@ -49,13 +49,13 @@ const transactionSchema = new mongoose.Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ['cash', 'balance'],
-      default: 'cash',
+      enum: ["cash", "balance"],
+      default: "cash",
     },
     status: {
       type: String,
-      enum: ['pending', 'completed', 'cancelled'],
-      default: 'completed',
+      enum: ["pending", "completed", "cancelled"],
+      default: "completed",
     },
     cashReceived: {
       type: Number,
@@ -63,14 +63,19 @@ const transactionSchema = new mongoose.Schema(
     changeDue: {
       type: Number,
     },
+    shippingAddress: {
+      type: String,
+    },
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 transactionSchema.index({ buyerId: 1 });
 transactionSchema.index({ storeId: 1 });
 transactionSchema.index({ createdAt: -1 });
 
-export const Transaction = mongoose.models.Transaction || mongoose.model('Transaction', transactionSchema);
+export const Transaction =
+  mongoose.models.Transaction ||
+  mongoose.model("Transaction", transactionSchema);

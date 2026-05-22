@@ -37,7 +37,13 @@ interface CartItem {
   storeName: string;
 }
 
-const CATEGORIES = ["Semua", "Sembako", "Makanan", "Minuman", "Kebutuhan Rumah"];
+const CATEGORIES = [
+  "Semua",
+  "Sembako",
+  "Makanan",
+  "Minuman",
+  "Kebutuhan Rumah",
+];
 
 const categoryEmoji: Record<string, string> = {
   Sembako: "🌾",
@@ -51,13 +57,22 @@ interface MemberStorefrontProps {
   apiBase?: string;
 }
 
-export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }: MemberStorefrontProps) {
+export default function MemberStorefront({
+  apiBase = "/api/admin/marketplace",
+}: MemberStorefrontProps) {
   const { user, isAuthenticated } = useAuthStore();
 
   const [stores, setStores] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [limit] = useState(24);
+  const [totalProducts, setTotalProducts] = useState<number | null>(null);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [sort, setSort] = useState<
+    "newest" | "price_asc" | "price_desc" | "stock_desc"
+  >("newest");
   const [selectedCategory, setSelectedCategory] = useState("Semua");
   const [selectedStore, setSelectedStore] = useState<string | null>(null);
 
@@ -71,7 +86,10 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
 
   // Checkout inputs
   const [buyerName, setBuyerName] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<"cash" | "balance">("cash");
+  const [shippingAddress, setShippingAddress] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<
+    "cash" | "balance" | "qris"
+  >("cash");
   const [cashReceived, setCashReceived] = useState("");
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutError, setCheckoutError] = useState("");
@@ -82,6 +100,8 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
   const [historyTransactions, setHistoryTransactions] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [activeReceipt, setActiveReceipt] = useState<any | null>(null);
+  const [paymentInfo, setPaymentInfo] = useState<any | null>(null);
+  const [paymentPolling, setPaymentPolling] = useState(false);
 
   // Sync logged in user name to buyerName
   useEffect(() => {
@@ -93,15 +113,27 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
   }, [user]);
 
   // Load stores and products
-  const fetchProductsAndStores = () => {
+  const fetchProductsAndStores = (pageArg = 1) => {
     setLoading(true);
     Promise.all([
       fetch(`${apiBase}/stores`).then((r) => r.json()),
-      fetch(`${apiBase}/products`).then((r) => r.json()),
+      fetch(
+        `${apiBase}/products?page=${pageArg}&limit=${limit}` +
+          `${debouncedSearch ? `&search=${encodeURIComponent(debouncedSearch)}` : ""}` +
+          `${selectedCategory && selectedCategory !== "Semua" ? `&category=${encodeURIComponent(selectedCategory)}` : ""}` +
+          `${selectedStore ? `&storeId=${encodeURIComponent(selectedStore)}` : ""}` +
+          `${sort ? `&sort=${encodeURIComponent(sort)}` : ""}`,
+      ).then((r) => r.json()),
     ])
       .then(([s, p]) => {
         setStores(s.stores || []);
-        setProducts(p.products || []);
+        const incoming = p.products || [];
+        if (pageArg === 1) {
+          setProducts(incoming);
+        } else {
+          setProducts((prev) => [...prev, ...incoming]);
+        }
+        setTotalProducts(p.meta?.total ?? null);
         setLoading(false);
       })
       .catch((err) => {
@@ -111,15 +143,31 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
   };
 
   useEffect(() => {
-    fetchProductsAndStores();
+    // initial load or when apiBase changes
+    setPage(1);
+    fetchProductsAndStores(1);
   }, [apiBase]);
+
+  // When filters/search/store change, reset to first page
+  useEffect(() => {
+    setPage(1);
+    fetchProductsAndStores(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearch, selectedCategory, selectedStore, sort]);
+
+  // debounce search input
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 400);
+    return () => clearTimeout(t);
+  }, [search]);
 
   // Fetch transaction history
   const fetchTransactionHistory = () => {
     setHistoryLoading(true);
     // Get guest transaction IDs from localstorage
-    const guestIds = localStorage.getItem("marketplace_guest_transactions") || "";
-    
+    const guestIds =
+      localStorage.getItem("marketplace_guest_transactions") || "";
+
     // We fetch history. The API will check auth cookies first; if not found, it checks "ids" query parameter
     let url = "/api/marketplace/history";
     if (!isAuthenticated && guestIds) {
@@ -144,16 +192,8 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
     }
   }, [activeTab, isAuthenticated]);
 
-  const filtered = useMemo(() => {
-    let list = products;
-    if (selectedStore) list = list.filter((p: any) => (p.storeId?._id || p.storeId) === selectedStore);
-    if (selectedCategory !== "Semua") list = list.filter((p: any) => p.category === selectedCategory);
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter((p: any) => p.name.toLowerCase().includes(q) || p.category?.toLowerCase().includes(q));
-    }
-    return list;
-  }, [products, selectedStore, selectedCategory, search]);
+  // Server-side filtered list (we request filters from the API)
+  const filtered = useMemo(() => products, [products]);
 
   const getStoreName = (p: any) => {
     if (p.storeId?.name) return p.storeId.name;
@@ -177,9 +217,21 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
       if (existing) {
         // Enforce stock limit
         if (existing.quantity >= product.stock) return prev;
-        return prev.map((c) => c._id === product._id ? { ...c, quantity: c.quantity + 1 } : c);
+        return prev.map((c) =>
+          c._id === product._id ? { ...c, quantity: c.quantity + 1 } : c,
+        );
       }
-      return [...prev, { _id: product._id, name: product.name, price: product.price, quantity: 1, category: product.category, storeName: getStoreName(product) }];
+      return [
+        ...prev,
+        {
+          _id: product._id,
+          name: product.name,
+          price: product.price,
+          quantity: 1,
+          category: product.category,
+          storeName: getStoreName(product),
+        },
+      ];
     });
   };
 
@@ -192,7 +244,7 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
           return { ...c, quantity: Math.max(1, newQty) };
         }
         return c;
-      })
+      }),
     );
   };
 
@@ -215,8 +267,12 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
         body: JSON.stringify({
           items: cart,
           paymentMethod,
-          cashReceived: paymentMethod === "cash" ? Number(cashReceived) || cartTotal : undefined,
+          cashReceived:
+            paymentMethod === "cash"
+              ? Number(cashReceived) || cartTotal
+              : undefined,
           buyerName: buyerName.trim() || undefined,
+          shippingAddress: shippingAddress.trim() || undefined,
         }),
       });
 
@@ -225,15 +281,45 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
         throw new Error(data.error || "Proses checkout gagal");
       }
 
-      // Success
-      setCreatedReceipts(data.transactions || []);
-      setCheckoutDone(true);
-      setCart([]);
+      // If QRIS payment required, show payment modal and poll status
+      if (data.payment) {
+        setPaymentInfo(data.payment);
+        // Save tx ids for guest history
+        if (!isAuthenticated && data.transactions) {
+          const txIds = data.transactions.map((tx: any) => tx._id);
+          const existingGuestIds =
+            localStorage.getItem("marketplace_guest_transactions") || "";
+          const updatedIds = existingGuestIds
+            ? [...existingGuestIds.split(","), ...txIds].join(",")
+            : txIds.join(",");
+          localStorage.setItem("marketplace_guest_transactions", updatedIds);
+        }
+        setCreatedReceipts(data.transactions || []);
+        setCart([]);
+        // start polling
+        setPaymentPolling(true);
+      } else {
+        // Success (cash)
+        setCreatedReceipts(data.transactions || []);
+        setCheckoutDone(true);
+        setCart([]);
+        // Save transaction IDs in localStorage if Guest so they can view history
+        if (!isAuthenticated && data.transactions) {
+          const txIds = data.transactions.map((tx: any) => tx._id);
+          const existingGuestIds =
+            localStorage.getItem("marketplace_guest_transactions") || "";
+          const updatedIds = existingGuestIds
+            ? [...existingGuestIds.split(","), ...txIds].join(",")
+            : txIds.join(",");
+          localStorage.setItem("marketplace_guest_transactions", updatedIds);
+        }
+      }
 
       // Save transaction IDs in localStorage if Guest so they can view history
       if (!isAuthenticated && data.transactions) {
         const txIds = data.transactions.map((tx: any) => tx._id);
-        const existingGuestIds = localStorage.getItem("marketplace_guest_transactions") || "";
+        const existingGuestIds =
+          localStorage.getItem("marketplace_guest_transactions") || "";
         const updatedIds = existingGuestIds
           ? [...existingGuestIds.split(","), ...txIds].join(",")
           : txIds.join(",");
@@ -254,7 +340,41 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
     setCreatedReceipts([]);
     setCartOpen(false);
     setCashReceived("");
+    setShippingAddress("");
   };
+
+  // Poll payment status when paymentInfo is set
+  useEffect(() => {
+    if (!paymentInfo || !paymentPolling) return;
+    let stopped = false;
+    const id = paymentInfo._id;
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/marketplace/payments/${id}`);
+        const json = await res.json();
+        if (json.payment && json.payment.status === "succeeded") {
+          // finalize client state
+          setPaymentPolling(false);
+          setPaymentInfo(null);
+          setCheckoutDone(true);
+          // refresh history
+          fetchTransactionHistory();
+        }
+      } catch (err) {
+        console.error("Payment poll error", err);
+      }
+    };
+    const iv = setInterval(() => {
+      if (!stopped) poll();
+    }, 3000);
+    // immediate poll
+    poll();
+    return () => {
+      stopped = true;
+      clearInterval(iv);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentInfo, paymentPolling]);
 
   if (loading) {
     return (
@@ -285,17 +405,22 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
               Harian Lebih Mudah
             </h2>
             <p className="text-white/70 text-sm sm:text-base max-w-md">
-              Temukan sembako, makanan ringan, dan kebutuhan rumah dari toko lokal terpercaya.
+              Temukan sembako, makanan ringan, dan kebutuhan rumah dari toko
+              lokal terpercaya.
             </p>
           </div>
           {/* Dashboard summary stats in Hero for premium looks */}
           <div className="flex gap-4 self-start sm:self-center shrink-0">
             <div className="px-4 py-3 rounded-2xl bg-white/10 backdrop-blur border border-white/10 text-white">
-              <p className="text-[9px] font-black uppercase text-white/60 tracking-wider">Toko Kelontong</p>
+              <p className="text-[9px] font-black uppercase text-white/60 tracking-wider">
+                Toko Kelontong
+              </p>
               <p className="text-xl font-black mt-0.5">{stores.length}</p>
             </div>
             <div className="px-4 py-3 rounded-2xl bg-white/10 backdrop-blur border border-white/10 text-white">
-              <p className="text-[9px] font-black uppercase text-white/60 tracking-wider">Total Produk</p>
+              <p className="text-[9px] font-black uppercase text-white/60 tracking-wider">
+                Total Produk
+              </p>
               <p className="text-xl font-black mt-0.5">{products.length}</p>
             </div>
           </div>
@@ -310,7 +435,7 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
             "flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all duration-200",
             activeTab === "shop"
               ? "bg-card text-foreground shadow border border-border/50"
-              : "text-muted-foreground hover:text-foreground"
+              : "text-muted-foreground hover:text-foreground",
           )}
         >
           <ShoppingBag className="w-3.5 h-3.5" />
@@ -322,7 +447,7 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
             "flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all duration-200",
             activeTab === "history"
               ? "bg-card text-foreground shadow border border-border/50"
-              : "text-muted-foreground hover:text-foreground"
+              : "text-muted-foreground hover:text-foreground",
           )}
         >
           <History className="w-3.5 h-3.5" />
@@ -343,6 +468,21 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
               className="w-full pl-11 pr-4 py-3 sm:py-3.5 rounded-2xl bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500/40 transition-all shadow-sm"
             />
           </div>
+          <div className="mt-3 flex items-center gap-3">
+            <label className="text-[9px] font-black text-muted-foreground uppercase tracking-widest">
+              Urutkan
+            </label>
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value as any)}
+              className="px-3 py-2 rounded-xl bg-card border border-border text-xs font-bold"
+            >
+              <option value="newest">Terbaru</option>
+              <option value="price_asc">Harga: Terendah</option>
+              <option value="price_desc">Harga: Tertinggi</option>
+              <option value="stock_desc">Stok: Terbanyak</option>
+            </select>
+          </div>
 
           {/* Category Filter */}
           <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide -mx-1 px-1">
@@ -354,10 +494,12 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
                   "flex-shrink-0 px-4 py-2 rounded-xl text-xs font-bold transition-all duration-200 border",
                   selectedCategory === cat
                     ? "bg-emerald-500 text-white border-emerald-500 shadow-md shadow-emerald-500/10"
-                    : "bg-card text-muted-foreground border-border hover:border-emerald-500/30 hover:text-foreground"
+                    : "bg-card text-muted-foreground border-border hover:border-emerald-500/30 hover:text-foreground",
                 )}
               >
-                {cat !== "Semua" && <span className="mr-1.5">{categoryEmoji[cat] || "📦"}</span>}
+                {cat !== "Semua" && (
+                  <span className="mr-1.5">{categoryEmoji[cat] || "📦"}</span>
+                )}
                 {cat}
               </button>
             ))}
@@ -375,7 +517,7 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
                   "flex-shrink-0 px-4 py-3 rounded-2xl border text-xs font-bold transition-all duration-200",
                   !selectedStore
                     ? "bg-foreground text-background border-foreground shadow"
-                    : "bg-card text-muted-foreground border-border hover:border-foreground/30"
+                    : "bg-card text-muted-foreground border-border hover:border-foreground/30",
                 )}
               >
                 Semua Toko
@@ -388,7 +530,7 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
                     "flex-shrink-0 px-4 py-3 rounded-2xl border text-xs font-bold transition-all duration-200 text-left relative",
                     selectedStore === store._id
                       ? "bg-foreground text-background border-foreground shadow"
-                      : "bg-card text-muted-foreground border-border hover:border-foreground/30"
+                      : "bg-card text-muted-foreground border-border hover:border-foreground/30",
                   )}
                 >
                   <span className="block">{store.name}</span>
@@ -412,8 +554,12 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
             {filtered.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 gap-3 text-center glass-panel rounded-3xl border border-dashed border-border">
                 <Package className="w-10 h-10 text-muted-foreground/30" />
-                <p className="text-sm font-bold text-foreground">Produk Tidak Ditemukan</p>
-                <p className="text-xs text-muted-foreground">Coba ubah kata kunci pencarian atau filter kategori Anda.</p>
+                <p className="text-sm font-bold text-foreground">
+                  Produk Tidak Ditemukan
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Coba ubah kata kunci pencarian atau filter kategori Anda.
+                </p>
               </div>
             ) : (
               <motion.div
@@ -474,7 +620,9 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
 
                           <div className="flex items-center justify-between mt-3 gap-2">
                             <div>
-                              <p className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider">Harga</p>
+                              <p className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider">
+                                Harga
+                              </p>
                               <p className="text-sm sm:text-base font-black text-foreground tracking-tight">
                                 {formatCurrency(product.price)}
                               </p>
@@ -497,41 +645,61 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
                 </AnimatePresence>
               </motion.div>
             )}
+            {/* Load more button */}
+            {totalProducts !== null && products.length < totalProducts && (
+              <div className="mt-4 flex justify-center">
+                <button
+                  onClick={() => {
+                    const next = page + 1;
+                    setPage(next);
+                    fetchProductsAndStores(next);
+                  }}
+                  disabled={loading}
+                  className="px-4 py-2 rounded-xl bg-emerald-500 text-white text-sm font-bold"
+                >
+                  {loading ? "Memuat..." : "Muat Lagi"}
+                </button>
+              </div>
+            )}
           </div>
         </>
-        ) : (
-          /* Transaction History List View */
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-black uppercase tracking-wider text-muted-foreground">
-                Riwayat Pembelian Belanja
-              </h3>
-            </div>
+      ) : (
+        /* Transaction History List View */
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-black uppercase tracking-wider text-muted-foreground">
+              Riwayat Pembelian Belanja
+            </h3>
+          </div>
 
-            {historyLoading ? (
-              <div className="flex flex-col items-center justify-center py-20 gap-3">
-                <div className="w-8 h-8 border-2 border-foreground/20 border-t-foreground rounded-full animate-spin" />
-                <p className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">
-                  Memuat data transaksi...
-                </p>
-              </div>
-            ) : historyTransactions.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 gap-3 text-center glass-panel rounded-3xl border border-dashed border-border">
-                <History className="w-10 h-10 text-muted-foreground/30" />
-                <p className="text-sm font-bold text-foreground">Belum Ada Transaksi</p>
-                <p className="text-xs text-muted-foreground">
-                  Semua transaksi yang Anda checkout akan tercantum di sini untuk tinjau struk.
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {historyTransactions.map((tx: any) => {
-                  const storeNames = tx.storeNames || [];
-                  const storeDisplay = storeNames.length > 1 
+          {historyLoading ? (
+            <div className="flex flex-col items-center justify-center py-20 gap-3">
+              <div className="w-8 h-8 border-2 border-foreground/20 border-t-foreground rounded-full animate-spin" />
+              <p className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">
+                Memuat data transaksi...
+              </p>
+            </div>
+          ) : historyTransactions.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 gap-3 text-center glass-panel rounded-3xl border border-dashed border-border">
+              <History className="w-10 h-10 text-muted-foreground/30" />
+              <p className="text-sm font-bold text-foreground">
+                Belum Ada Transaksi
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Semua transaksi yang Anda checkout akan tercantum di sini untuk
+                tinjau struk.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {historyTransactions.map((tx: any) => {
+                const storeNames = tx.storeNames || [];
+                const storeDisplay =
+                  storeNames.length > 1
                     ? `${storeNames.length} Toko Berbeda`
                     : storeNames[0] || "Toko Kelontong";
 
-                  return (
+                return (
                   <motion.div
                     key={tx._id}
                     whileHover={{ y: -3, scale: 1.01 }}
@@ -577,20 +745,25 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
 
                     <div className="flex items-center justify-between pt-1">
                       <div>
-                        <p className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider">Total Belanja</p>
-                        <p className="text-base font-black text-foreground">{formatCurrency(tx.totalAmount)}</p>
+                        <p className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider">
+                          Total Belanja
+                        </p>
+                        <p className="text-base font-black text-foreground">
+                          {formatCurrency(tx.totalAmount)}
+                        </p>
                       </div>
 
                       <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground group-hover:text-foreground flex items-center gap-1 transition-colors">
-                        Lihat Struk <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
+                        Lihat Struk{" "}
+                        <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
                       </span>
                     </div>
                   </motion.div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       )}
 
       {/* Floating Cart Button */}
@@ -609,7 +782,9 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
                 {cartCount}
               </span>
             </div>
-            <span className="text-sm font-bold hidden sm:block">{formatCurrency(cartTotal)}</span>
+            <span className="text-sm font-bold hidden sm:block">
+              {formatCurrency(cartTotal)}
+            </span>
           </motion.button>
         )}
       </AnimatePresence>
@@ -641,13 +816,19 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
                     <motion.div
                       initial={{ scale: 0 }}
                       animate={{ scale: 1 }}
-                      transition={{ type: "spring", stiffness: 200, delay: 0.1 }}
+                      transition={{
+                        type: "spring",
+                        stiffness: 200,
+                        delay: 0.1,
+                      }}
                       className="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-500"
                     >
                       <CheckCircle className="w-8 h-8" />
                     </motion.div>
                     <div>
-                      <h3 className="text-lg font-black text-foreground">Checkout Berhasil!</h3>
+                      <h3 className="text-lg font-black text-foreground">
+                        Checkout Berhasil!
+                      </h3>
                       <p className="text-xs text-muted-foreground mt-1">
                         Pembayaran diterima dan pesanan sedang dipersiapkan.
                       </p>
@@ -656,7 +837,9 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
                     {/* Printable Invoice receipt card */}
                     <div className="w-full bg-muted/40 border border-border/60 rounded-2xl p-5 text-left font-sans space-y-4 max-w-sm mt-4">
                       <div className="text-center pb-3 border-b border-border/50 space-y-1">
-                        <p className="text-xs font-black uppercase text-foreground">Struk Belanja</p>
+                        <p className="text-xs font-black uppercase text-foreground">
+                          Struk Belanja
+                        </p>
                         <p className="text-[10px] font-mono text-muted-foreground uppercase">
                           No: {createdReceipts[0]?._id || "TX-SIMULATION"}
                         </p>
@@ -676,11 +859,15 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
                         </div>
                         <div className="flex justify-between">
                           <span>Pelanggan</span>
-                          <span className="text-foreground">{buyerName || "Guest"}</span>
+                          <span className="text-foreground">
+                            {buyerName || "Guest"}
+                          </span>
                         </div>
                         <div className="flex justify-between">
                           <span>Metode</span>
-                          <span className="text-foreground uppercase">{paymentMethod === "cash" ? "Tunai/COD" : "Saldo"}</span>
+                          <span className="text-foreground uppercase">
+                            {paymentMethod === "cash" ? "Tunai/COD" : "Saldo"}
+                          </span>
                         </div>
                       </div>
 
@@ -692,9 +879,16 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
                               {tx.storeId?.name || "Toko Kelontong"}
                             </p>
                             {tx.items?.map((it: any, iIdx: number) => (
-                              <div key={iIdx} className="flex justify-between text-[10px] text-muted-foreground">
-                                <span className="font-semibold">{it.name} x{it.quantity}</span>
-                                <span className="font-bold text-foreground">{formatCurrency(it.price * it.quantity)}</span>
+                              <div
+                                key={iIdx}
+                                className="flex justify-between text-[10px] text-muted-foreground"
+                              >
+                                <span className="font-semibold">
+                                  {it.name} x{it.quantity}
+                                </span>
+                                <span className="font-bold text-foreground">
+                                  {formatCurrency(it.price * it.quantity)}
+                                </span>
                               </div>
                             ))}
                           </div>
@@ -704,17 +898,28 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
                       <div className="space-y-1">
                         <div className="flex justify-between text-xs font-black text-foreground">
                           <span>Total Pembayaran</span>
-                          <span>{formatCurrency(createdReceipts.reduce((sum, tx) => sum + tx.totalAmount, 0))}</span>
+                          <span>
+                            {formatCurrency(
+                              createdReceipts.reduce(
+                                (sum, tx) => sum + tx.totalAmount,
+                                0,
+                              ),
+                            )}
+                          </span>
                         </div>
                         {paymentMethod === "cash" && cashReceived && (
                           <div className="text-[10px] font-semibold text-muted-foreground space-y-1 pt-1.5">
                             <div className="flex justify-between">
                               <span>Uang Diterima</span>
-                              <span className="text-foreground font-bold">{formatCurrency(Number(cashReceived))}</span>
+                              <span className="text-foreground font-bold">
+                                {formatCurrency(Number(cashReceived))}
+                              </span>
                             </div>
                             <div className="flex justify-between border-t border-dashed border-border/40 pt-1 text-emerald-500">
                               <span>Kembalian</span>
-                              <span className="font-black">{formatCurrency(changeDue)}</span>
+                              <span className="font-black">
+                                {formatCurrency(changeDue)}
+                              </span>
                             </div>
                           </div>
                         )}
@@ -739,7 +944,9 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
                         <ShoppingCart className="w-5 h-5" />
                       </div>
                       <div>
-                        <h3 className="text-sm font-black text-foreground">Keranjang Belanja</h3>
+                        <h3 className="text-sm font-black text-foreground">
+                          Keranjang Belanja
+                        </h3>
                         <p className="text-[9px] text-muted-foreground font-black uppercase tracking-widest">
                           {cartCount} Barang
                         </p>
@@ -764,11 +971,15 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
                       {cart.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
                           <ShoppingCart className="w-10 h-10 text-muted-foreground/20" />
-                          <p className="text-xs font-bold text-muted-foreground">Keranjang Anda Kosong</p>
+                          <p className="text-xs font-bold text-muted-foreground">
+                            Keranjang Anda Kosong
+                          </p>
                         </div>
                       ) : (
                         cart.map((item) => {
-                          const prodRef = products.find((p) => p._id === item._id);
+                          const prodRef = products.find(
+                            (p) => p._id === item._id,
+                          );
                           const maxStock = prodRef ? prodRef.stock : 99;
                           return (
                             <motion.div
@@ -783,7 +994,9 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
                                 {categoryEmoji[item.category] || "📦"}
                               </div>
                               <div className="flex-1 min-w-0">
-                                <p className="text-xs font-bold text-foreground truncate">{item.name}</p>
+                                <p className="text-xs font-bold text-foreground truncate">
+                                  {item.name}
+                                </p>
                                 <p className="text-[9px] text-muted-foreground mt-0.5 truncate flex items-center gap-1">
                                   <StoreIcon className="w-2.5 h-2.5 shrink-0" />
                                   {item.storeName}
@@ -796,15 +1009,21 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
                               <div className="flex items-center gap-1 shrink-0 bg-card rounded-lg border border-border p-0.5">
                                 <button
                                   type="button"
-                                  onClick={() => updateQty(item._id, -1, maxStock)}
+                                  onClick={() =>
+                                    updateQty(item._id, -1, maxStock)
+                                  }
                                   className="w-6 h-6 rounded-md flex items-center justify-center hover:bg-muted text-foreground transition-colors"
                                 >
                                   <Minus className="w-3 h-3" />
                                 </button>
-                                <span className="w-6 text-center text-xs font-black">{item.quantity}</span>
+                                <span className="w-6 text-center text-xs font-black">
+                                  {item.quantity}
+                                </span>
                                 <button
                                   type="button"
-                                  onClick={() => updateQty(item._id, 1, maxStock)}
+                                  onClick={() =>
+                                    updateQty(item._id, 1, maxStock)
+                                  }
                                   className="w-6 h-6 rounded-md flex items-center justify-center hover:bg-muted text-foreground transition-colors"
                                 >
                                   <Plus className="w-3 h-3" />
@@ -825,7 +1044,10 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
 
                     {cart.length > 0 && (
                       /* CHECKOUT CUSTOMER INFO & PAYMENT SIMULATION */
-                      <form onSubmit={handleCheckout} className="space-y-4 border-t border-border/50 pt-5">
+                      <form
+                        onSubmit={handleCheckout}
+                        className="space-y-4 border-t border-border/50 pt-5"
+                      >
                         <h4 className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">
                           Informasi &amp; Pembayaran
                         </h4>
@@ -845,6 +1067,20 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
                           />
                         </div>
 
+                        {/* Shipping Address */}
+                        <div className="space-y-1.5">
+                          <label className="text-[9px] font-black text-muted-foreground uppercase tracking-widest block">
+                            Alamat Pengiriman (opsional)
+                          </label>
+                          <input
+                            type="text"
+                            value={shippingAddress}
+                            onChange={(e) => setShippingAddress(e.target.value)}
+                            placeholder="Masukkan alamat / catatan alamat"
+                            className="w-full px-4 py-2.5 rounded-xl bg-muted/40 border border-border focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-xs font-bold"
+                          />
+                        </div>
+
                         {/* Payment Method Toggle */}
                         <div className="space-y-1.5">
                           <label className="text-[9px] font-black text-muted-foreground uppercase tracking-widest block">
@@ -858,11 +1094,24 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
                                 "py-2.5 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5",
                                 paymentMethod === "cash"
                                   ? "bg-emerald-500 text-white border-emerald-500 shadow-md shadow-emerald-500/10"
-                                  : "bg-muted/30 text-muted-foreground border-border hover:border-foreground/30"
+                                  : "bg-muted/30 text-muted-foreground border-border hover:border-foreground/30",
                               )}
                             >
                               <Coins className="w-3.5 h-3.5" />
                               Tunai / COD
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setPaymentMethod("qris")}
+                              className={cn(
+                                "py-2.5 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5",
+                                paymentMethod === "qris"
+                                  ? "bg-emerald-500 text-white border-emerald-500 shadow-md shadow-emerald-500/10"
+                                  : "bg-muted/30 text-muted-foreground border-border hover:border-foreground/30",
+                              )}
+                            >
+                              <FileText className="w-3.5 h-3.5" />
+                              QRIS (Sandbox)
                             </button>
                             <button
                               type="button"
@@ -871,7 +1120,7 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
                                 "py-2.5 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5",
                                 paymentMethod === "balance"
                                   ? "bg-emerald-500 text-white border-emerald-500 shadow-md shadow-emerald-500/10"
-                                  : "bg-muted/30 text-muted-foreground border-border hover:border-foreground/30"
+                                  : "bg-muted/30 text-muted-foreground border-border hover:border-foreground/30",
                               )}
                             >
                               <DollarSign className="w-3.5 h-3.5" />
@@ -892,7 +1141,9 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
                                 min={cartTotal}
                                 required
                                 value={cashReceived}
-                                onChange={(e) => setCashReceived(e.target.value)}
+                                onChange={(e) =>
+                                  setCashReceived(e.target.value)
+                                }
                                 placeholder="Masukkan nominal uang tunai"
                                 className="w-full px-3 py-2 rounded-lg bg-card border border-border focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-xs font-black"
                               />
@@ -902,7 +1153,9 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
                             <div className="flex flex-wrap gap-1.5 pt-0.5">
                               <button
                                 type="button"
-                                onClick={() => setCashReceived(cartTotal.toString())}
+                                onClick={() =>
+                                  setCashReceived(cartTotal.toString())
+                                }
                                 className="px-2.5 py-1 bg-card hover:bg-muted border border-border rounded text-[9px] font-black uppercase tracking-wider text-muted-foreground hover:text-foreground"
                               >
                                 Uang Pas
@@ -912,7 +1165,9 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
                                   key={denom}
                                   type="button"
                                   disabled={denom < cartTotal}
-                                  onClick={() => setCashReceived(denom.toString())}
+                                  onClick={() =>
+                                    setCashReceived(denom.toString())
+                                  }
                                   className="px-2.5 py-1 bg-card hover:bg-muted disabled:opacity-40 border border-border rounded text-[9px] font-black text-muted-foreground hover:text-foreground"
                                 >
                                   {formatCurrency(denom)}
@@ -922,7 +1177,9 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
 
                             {Number(cashReceived) >= cartTotal && (
                               <div className="flex justify-between items-center text-xs font-black text-emerald-500 border-t border-dashed border-border/60 pt-2">
-                                <span className="uppercase tracking-wider text-[9px]">Uang Kembalian</span>
+                                <span className="uppercase tracking-wider text-[9px]">
+                                  Uang Kembalian
+                                </span>
                                 <span>{formatCurrency(changeDue)}</span>
                               </div>
                             )}
@@ -943,16 +1200,26 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
                   {cart.length > 0 && (
                     <div className="p-5 border-t border-border space-y-4 shrink-0 bg-muted/20">
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-muted-foreground">Total Belanja</span>
-                        <span className="text-xl font-black text-foreground">{formatCurrency(cartTotal)}</span>
+                        <span className="text-xs font-bold text-muted-foreground">
+                          Total Belanja
+                        </span>
+                        <span className="text-xl font-black text-foreground">
+                          {formatCurrency(cartTotal)}
+                        </span>
                       </div>
                       <button
                         type="submit"
-                        disabled={checkoutLoading || (paymentMethod === "cash" && (!cashReceived || Number(cashReceived) < cartTotal))}
+                        disabled={
+                          checkoutLoading ||
+                          (paymentMethod === "cash" &&
+                            (!cashReceived || Number(cashReceived) < cartTotal))
+                        }
                         onClick={handleCheckout}
                         className="w-full py-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:bg-muted disabled:text-muted-foreground text-white font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-emerald-500/15 active:scale-[0.98]"
                       >
-                        {checkoutLoading ? "Memproses Checkout..." : "Bayar &amp; Checkout Sekarang"}
+                        {checkoutLoading
+                          ? "Memproses Checkout..."
+                          : "Bayar &amp; Checkout Sekarang"}
                       </button>
                     </div>
                   )}
@@ -989,7 +1256,9 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
               </button>
 
               <div className="aspect-[4/3] bg-gradient-to-br from-muted/50 to-muted flex items-center justify-center shrink-0 relative overflow-hidden select-none">
-                <span className="text-7xl sm:text-8xl">{categoryEmoji[detailProduct.category] || "📦"}</span>
+                <span className="text-7xl sm:text-8xl">
+                  {categoryEmoji[detailProduct.category] || "📦"}
+                </span>
                 {detailProduct.stock === 0 && (
                   <div className="absolute inset-0 bg-black/45 backdrop-blur-xs flex items-center justify-center">
                     <span className="px-4 py-2 bg-rose-500 text-white rounded-xl text-xs font-black uppercase tracking-widest">
@@ -1014,23 +1283,36 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
                 </div>
 
                 <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
-                  {detailProduct.description || "Deskripsi produk belum disediakan oleh penjual toko kelontong."}
+                  {detailProduct.description ||
+                    "Deskripsi produk belum disediakan oleh penjual toko kelontong."}
                 </p>
 
                 <div className="flex items-center justify-between gap-4 p-4 rounded-2xl bg-muted/40 border border-border/60">
                   <div>
-                    <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">Harga Satuan</p>
+                    <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">
+                      Harga Satuan
+                    </p>
                     <p className="text-xl font-black text-foreground tracking-tight">
                       {formatCurrency(detailProduct.price)}
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">Tersedia</p>
-                    <p className={cn(
-                      "text-base font-black",
-                      detailProduct.stock > 10 ? "text-emerald-500" : detailProduct.stock > 0 ? "text-amber-500" : "text-rose-500"
-                    )}>
-                      {detailProduct.stock > 0 ? `${detailProduct.stock} Unit` : "Habis"}
+                    <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">
+                      Tersedia
+                    </p>
+                    <p
+                      className={cn(
+                        "text-base font-black",
+                        detailProduct.stock > 10
+                          ? "text-emerald-500"
+                          : detailProduct.stock > 0
+                            ? "text-amber-500"
+                            : "text-rose-500",
+                      )}
+                    >
+                      {detailProduct.stock > 0
+                        ? `${detailProduct.stock} Unit`
+                        : "Habis"}
                     </p>
                   </div>
                 </div>
@@ -1047,6 +1329,89 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
                   <ShoppingCart className="w-4 h-4" />
                   Tambah ke Keranjang
                 </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Payment QR Modal (Sandbox) */}
+      <AnimatePresence>
+        {paymentInfo && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => {
+                if (!paymentPolling) setPaymentInfo(null);
+              }}
+              className="fixed inset-0 bg-black/60 backdrop-blur-xs z-[80]"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="fixed inset-4 sm:inset-auto sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-full sm:max-w-md z-[90] bg-card rounded-3xl border border-border shadow-2xl flex flex-col max-h-[80vh] overflow-hidden"
+            >
+              <div className="p-4 border-b border-border flex items-center justify-between">
+                <h3 className="text-sm font-black">
+                  Pembayaran QRIS (Sandbox)
+                </h3>
+                <button
+                  onClick={() => setPaymentInfo(null)}
+                  className="p-1 rounded-md"
+                >
+                  {" "}
+                  <X className="w-4 h-4 text-muted-foreground" />{" "}
+                </button>
+              </div>
+              <div className="p-6 space-y-4 text-center">
+                <p className="text-xs text-muted-foreground">
+                  Scan QR berikut menggunakan aplikasi pembayaran yang mendukung
+                  QRIS (sandbox):
+                </p>
+                <div className="mx-auto w-48 h-48 bg-white flex items-center justify-center rounded-xl shadow">
+                  <pre className="text-xs font-mono p-2 break-words text-center">
+                    {paymentInfo.qrPayload}
+                  </pre>
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  Jumlah: {formatCurrency(paymentInfo.amount)}
+                </p>
+                <div className="flex gap-2 justify-center">
+                  <button
+                    onClick={async () => {
+                      // simulate payment confirm
+                      try {
+                        const res = await fetch(
+                          `/api/marketplace/payments/${paymentInfo._id}`,
+                          { method: "POST" },
+                        );
+                        if (res.ok) {
+                          setPaymentPolling(false);
+                          setPaymentInfo(null);
+                          setCheckoutDone(true);
+                          fetchTransactionHistory();
+                        }
+                      } catch (err) {
+                        console.error(err);
+                      }
+                    }}
+                    className="px-4 py-2 rounded-xl bg-emerald-500 text-white font-bold"
+                  >
+                    Simulasikan Pembayaran (Sandbox)
+                  </button>
+                  <button
+                    onClick={() => {
+                      setPaymentPolling(false);
+                      setPaymentInfo(null);
+                    }}
+                    className="px-4 py-2 rounded-xl bg-muted text-foreground"
+                  >
+                    Tutup
+                  </button>
+                </div>
               </div>
             </motion.div>
           </>
@@ -1074,7 +1439,8 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
               {/* Receipt Header */}
               <div className="p-4 border-b border-border flex items-center justify-between shrink-0 bg-muted/10">
                 <span className="flex items-center gap-2 text-xs font-black uppercase text-foreground">
-                  <Receipt className="w-4 h-4 text-emerald-500" /> Struk Pembelian
+                  <Receipt className="w-4 h-4 text-emerald-500" /> Struk
+                  Pembelian
                 </span>
                 <button
                   onClick={() => setActiveReceipt(null)}
@@ -1088,10 +1454,14 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
               <div className="p-6 overflow-y-auto space-y-6">
                 <div className="text-center space-y-1 pb-4 border-b border-border/50">
                   <h3 className="text-sm font-black uppercase text-foreground">
-                    {activeReceipt.isGrouped ? "Marketplace Order" : (activeReceipt.storeId?.name || "Toko Kelontong")}
+                    {activeReceipt.isGrouped
+                      ? "Marketplace Order"
+                      : activeReceipt.storeId?.name || "Toko Kelontong"}
                   </h3>
                   <p className="text-[10px] text-muted-foreground font-semibold">
-                    {activeReceipt.isGrouped ? `${(activeReceipt.storeNames || []).length} Toko Berbeda` : (activeReceipt.storeId?.address || "Alamat Toko")}
+                    {activeReceipt.isGrouped
+                      ? `${(activeReceipt.storeNames || []).length} Toko Berbeda`
+                      : activeReceipt.storeId?.address || "Alamat Toko"}
                   </p>
                   <p className="text-[10px] font-mono text-muted-foreground uppercase pt-1">
                     No: {activeReceipt._id}
@@ -1102,20 +1472,27 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
                   <div className="flex justify-between">
                     <span>Tanggal &amp; Waktu</span>
                     <span className="text-foreground">
-                      {new Date(activeReceipt.createdAt).toLocaleString("id-ID", {
-                        dateStyle: "medium",
-                        timeStyle: "short",
-                      })}
+                      {new Date(activeReceipt.createdAt).toLocaleString(
+                        "id-ID",
+                        {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        },
+                      )}
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span>Pelanggan</span>
-                    <span className="text-foreground">{activeReceipt.buyerName}</span>
+                    <span className="text-foreground">
+                      {activeReceipt.buyerName}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span>Metode Pembayaran</span>
                     <span className="text-foreground uppercase">
-                      {activeReceipt.paymentMethod === "cash" ? "Tunai / COD" : "Saldo Wallet"}
+                      {activeReceipt.paymentMethod === "cash"
+                        ? "Tunai / COD"
+                        : "Saldo Wallet"}
                     </span>
                   </div>
                   <div className="flex justify-between">
@@ -1132,14 +1509,23 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
                     Rincian Barang
                   </p>
                   {activeReceipt.items?.map((it: any, idx: number) => (
-                    <div key={idx} className="flex justify-between text-xs text-muted-foreground">
+                    <div
+                      key={idx}
+                      className="flex justify-between text-xs text-muted-foreground"
+                    >
                       <div className="flex flex-col">
-                        <span className="font-semibold text-foreground">{it.name} x{it.quantity}</span>
+                        <span className="font-semibold text-foreground">
+                          {it.name} x{it.quantity}
+                        </span>
                         {activeReceipt.isGrouped && (
-                          <span className="text-[9px] font-bold text-emerald-500 uppercase tracking-widest mt-0.5">{it.storeName}</span>
+                          <span className="text-[9px] font-bold text-emerald-500 uppercase tracking-widest mt-0.5">
+                            {it.storeName}
+                          </span>
                         )}
                       </div>
-                      <span className="font-bold text-foreground">{formatCurrency(it.price * it.quantity)}</span>
+                      <span className="font-bold text-foreground">
+                        {formatCurrency(it.price * it.quantity)}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -1149,18 +1535,23 @@ export default function MemberStorefront({ apiBase = "/api/admin/marketplace" }:
                     <span>Total Belanja</span>
                     <span>{formatCurrency(activeReceipt.totalAmount)}</span>
                   </div>
-                  {activeReceipt.paymentMethod === "cash" && activeReceipt.cashReceived && (
-                    <div className="text-[10px] font-semibold text-muted-foreground space-y-1.5 pt-1.5">
-                      <div className="flex justify-between">
-                        <span>Uang Diterima</span>
-                        <span className="text-foreground font-bold">{formatCurrency(activeReceipt.cashReceived)}</span>
+                  {activeReceipt.paymentMethod === "cash" &&
+                    activeReceipt.cashReceived && (
+                      <div className="text-[10px] font-semibold text-muted-foreground space-y-1.5 pt-1.5">
+                        <div className="flex justify-between">
+                          <span>Uang Diterima</span>
+                          <span className="text-foreground font-bold">
+                            {formatCurrency(activeReceipt.cashReceived)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between border-t border-dashed border-border/40 pt-1.5 text-emerald-500">
+                          <span>Uang Kembalian</span>
+                          <span className="font-black">
+                            {formatCurrency(activeReceipt.changeDue || 0)}
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex justify-between border-t border-dashed border-border/40 pt-1.5 text-emerald-500">
-                        <span>Uang Kembalian</span>
-                        <span className="font-black">{formatCurrency(activeReceipt.changeDue || 0)}</span>
-                      </div>
-                    </div>
-                  )}
+                    )}
                 </div>
               </div>
 
